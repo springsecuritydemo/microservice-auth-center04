@@ -1,3 +1,4 @@
+
 无论是在生活还是在 WEB 应用开发中，安全一直是非常重要的一个方面。安全虽然属于应用的非功能需求，但是应该在应用开启初期就考虑进来。如果在应用开发的后期才考虑安全问题，就可能陷入一个两难的境地：
 
 一方面，应用存在严重的安全漏洞，无法满足用户的要求，并可能造成用户的隐私数据被攻击者窃取；
@@ -537,3 +538,5 @@ ROLE_USER 账户：用户名 pyy，密码 123
 ![](https://upload-images.jianshu.io/upload_images/11464886-62ac78d01e5ab0c1.gif?imageMogr2/auto-orient/strip)
 
 到此，我们的SpringBoot + SpringSecurity 入门案例已经讲解完毕，接下来我们将使用SpringSecurity 完成 用户登录 - 自动登录功能。
+
+

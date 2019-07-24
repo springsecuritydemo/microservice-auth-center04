@@ -1,50 +1,46 @@
-在上一章[入门案例](https://www.jianshu.com/p/f7efa26854c6)
-中，我们实现了入门程序，本篇我们在上一章的基础上完成自动登录功能。
+当我们登录失败的时候，SpringSecurity 帮我们跳转到了 `/login?error` URL，奇怪的是不管是控制台还是网页上都没有打印错误信息。
+![](https://upload-images.jianshu.io/upload_images/11464886-8a702143d6654227.png?imageMogr2/auto-orient/strip%7CimageView2/2/w/1240)
 
-## 一、修改登录页面：login.html
-在登录页面中添加自动登录复选框，自动登录字段名必须为：remember-me
+这是因为首先 `/login?error` 是SpringSecurity 默认的失败 URL，其次如果你不自己处理这个异常，这个异常时不会被处理的。
+
+## 一、常见异常
+我们先来列举下一些 SpringSecurity 中常见的异常：
+- `UsernameNotFoundException` （用户不存在）
+- `DisableException`（用户已被禁用）
+- `BadCredentialsException`（坏的凭据）
+- `LockedException`（账号锁定）
+- `CerdentialsExpiredException`（证书过期）
+- ...
+以上列出的这些异常都是 `AuthenticationException` 的子类，然后我们看 SpringSecurity 是如何处理 `AuthenticationException` 异常的。
+
+## 二、源码分析
+SpringSecurity的异常处理是在过滤器中进行的，我们在 `AbastrctAuthenticationProcessingFilter` 中找到了对 `Authentication` 的处理：
+- 在 doFilter() 中，捕获 AuthenticationException 异常，并交给 unsuccessfulAuthentication() 处理。
+![](https://upload-images.jianshu.io/upload_images/11464886-3d79a9c35d16a904.png?imageMogr2/auto-orient/strip%7CimageView2/2/w/1240)
+- 在 `unsuccessfulAuthentication()` 中，转交给了 `SimpleUrlAuthenticationFailureHandler` 类的 `onAuthencicationFailure()` 处理。
+![](https://upload-images.jianshu.io/upload_images/11464886-5bee808f9e6b76e3.png?imageMogr2/auto-orient/strip%7CimageView2/2/w/1240)
+- 在 onAuthenticationFailure() 中，首先判断有没有设置 `defaultFailureUrl`。
+
+   a. 如果没有设置，直接返回 401 错误，即 `HttpStatus.UNAUTHORIZED` 的值。
+   b. 如果设置了，首先执行 `saveException()` 方法。然后判断 `forwardToDestination` 是否为服务器调整，默认使用重定向即客户端跳转。
+
+![](https://upload-images.jianshu.io/upload_images/11464886-db57d1e842f65ea2.png?imageMogr2/auto-orient/strip%7CimageView2/2/w/1240)
+
+- 在 saveException() 方法中，首先判断 `forwardToDestination`，如果使用服务器跳转则写入`Request`，客户端跳转则写入 `Session`。写入名为 `WebAttributes.AUTHENTICATION_EXCEPTION` 常量对应值`SPRING_SECURITY_LAST_EXCEPTION`，值为 `AuthenticationException` 对象。
+![](https://upload-images.jianshu.io/upload_images/11464886-97e8cb95c2b433fc.png?imageMogr2/auto-orient/strip%7CimageView2/2/w/1240)
+
+至此 SpringSecurity 完成了异常处理，总结下流程：
+
+–> AbstractAuthenticationProcessingFilter`.doFilter()`
+–> AbstractAuthenticationProcessingFilter.`unsuccessfulAuthentication()`
+–> SimpleUrlAuthenticationFailureHandler.`onAuthenticationFailure()`
+–> SimpleUrlAuthenticationFailureHandler.`saveException()`
+
+## 三、处理异常
+上面通过源码看着挺复杂，但真正处理起来SpringSecurity为我们提供了方便的方式，我们只需要指定错误的url，然后在该方法中对异常进行处理即可。
+- 指定错误url ，在`WebSecurityConfig` 中添加 `.failureUrl("/login/error")`：
 ```
-<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <title>登陆</title>
-</head>
-<body>
-<h1>登陆</h1>
-<form method="post" action="/login">
-    <div>
-        用户名：<input type="text" name="username">
-    </div>
-    <div>
-        密　码：<input type="password" name="password">
-    </div>
-    <div>
-        <label><input type="checkbox" name="remember-me"/>自动登录</label>
-        <button type="submit">立即登陆</button>
-    </div>
-</form>
-</body>
-</html>
-```
-## 二、自动登录两种实现方式
-### 2.1 Cookie 存储
-这种方式十分简单，只需要在 `WebSecurityConfig` 中的 `configure()` 方法中添加一个 `rememberMe()` 即可，代码如下：
-```
-@Configuration
-@EnableWebSecurity
-@EnableGlobalMethodSecurity(prePostEnabled = true)
-public class WebSecurityConfig extends WebSecurityConfigurerAdapter {
-
-    @Autowired
-    private CustomUserDetailsService userDetailsService;
-
-    @Override
-    protected void configure(AuthenticationManagerBuilder auth) throws Exception {
-        auth.userDetailsService(userDetailsService).passwordEncoder(new BCryptPasswordEncoder());
-    }
-
-    @Override
+ @Override
     protected void configure(HttpSecurity http) throws Exception {
         http.authorizeRequests()
                 // 如果有允许匿名的url，填在下面
@@ -53,76 +49,10 @@ public class WebSecurityConfig extends WebSecurityConfigurerAdapter {
                 .and()
                 // 设置登陆页
                 .formLogin().loginPage("/login")
-                // 设置登陆成功页
+                // 设置登陆成功url
                 .defaultSuccessUrl("/").permitAll()
-                // 自定义登陆用户名和密码参数，默认为username和password
-//                .usernameParameter("username")
-//                .passwordParameter("password")
-                .and()
-                .logout().permitAll()
-                // 自动登录
-                .and().rememberMe();
-
-        // 关闭CSRF跨域
-        http.csrf().disable();
-    }
-
-    @Override
-    public void configure(WebSecurity web) throws Exception {
-        // 设置拦截忽略文件夹，可以对静态资源放行
-        web.ignoring().antMatchers("/css/**", "/js/**");
-    }
-}
-```
-当我们登录时勾选【自动登录】时，会自动在 `Cookie` 中保存一个名为 `remember-me` 的cookie，默认有效期为2周，其值是一个加密字符串：
-![](https://upload-images.jianshu.io/upload_images/11464886-f3b9d7a749438781.gif?imageMogr2/auto-orient/strip)
-当再次访问系统首页时，浏览器会携带这个 cookie 进行访问，SpringSecurity校验Cookie的有效性，完成自动登录。
-![](https://upload-images.jianshu.io/upload_images/11464886-4f7c4bb5bef20683.png?imageMogr2/auto-orient/strip%7CimageView2/2/w/1240)
-
-### 2.2 数据库存储
-使用 Cookie 存储虽然方便，但是大家都知道 Cookie 毕竟是保存在客户端的，而且 Cookie 的值还与用户名、密码这些敏感信息有关，虽然加密了，但是将这些敏感信息存在客户端，毕竟不太保险。（万一遇到黑客给黑了就尴尬了┭┮﹏┭┮）
-
-**SpringSecurity 还提供了另一种相对安全的实现机制： **
-- 在客户端的 Cookie中，仅保存一个无意义的加密串（与用户名和密码等敏感信息无关），然后在数据库中保存该加密串 - 用户信息的对应关系，自动登录时，用 Cookie 中的加密串，到数据库验证，如果通过，自动登录才算成功。
-
-#### 2.2.1 基本原理
-当浏览器发起表单登录请求时，当通过 `UsernamePasswordAuthenticationFilter` 认证成功后，会经过 `RememberMeService`, 在其中有个 `TokenRepository` ， 它会生成一个 `token`， 首先将 token 写入到浏览器的 `Cookie `中，然后将 token、认证成功的用户名写入到数据库中。
-
-当浏览器下次请求时，会经过 `RememberMeAuthenticationFilter`，它会读取 `Cookie` 中的 `token`，交给 `RememberMeService` ，获取用户信息，并将用户信息放入到 `SpringSecurity` 中，实现自动登录。
-
-![](https://upload-images.jianshu.io/upload_images/11464886-4c032e201db2c5b1.png?imageMogr2/auto-orient/strip%7CimageView2/2/w/1240)
-
-`RememberMeAuthenticationFilter `在整个过滤器链中是比较靠后的位置，也就是说在传统的登录方式都无法登录情况下才会使用自动登录。
-![](https://upload-images.jianshu.io/upload_images/11464886-3af0fce944ded231.png?imageMogr2/auto-orient/strip%7CimageView2/2/w/1240)
-
-### 2.2.2 代码实现
-在 WebSecurityConfig 中注入 dataSource ，创建一个 PersistentTokenRepository 的Bean对象：
-```
-    @Autowired
-    private DataSource dataSource;
-
-    @Bean
-    public PersistentTokenRepository persistentTokenRepository() {
-        JdbcTokenRepositoryImpl tokenRepository = new JdbcTokenRepositoryImpl();
-        tokenRepository.setDataSource(dataSource);
-        // 如果token表不存在，使用下面可以自动初始化表结构，如果已经存在，请注释掉，否则会报错
-        // tokenRepository.setCreateTableOnStartup(true);
-        return tokenRepository;
-    }
-```
-在 config() 中配置自动登录：
-```
-@Override
-    protected void configure(HttpSecurity http) throws Exception {
-        http.authorizeRequests()
-                // 如果有允许匿名的url，填在下面
-//                .antMatchers().permitAll()
-                .anyRequest().authenticated()
-                .and()
-                // 设置登陆页
-                .formLogin().loginPage("/login")
-                // 设置登陆成功页
-                .defaultSuccessUrl("/").permitAll()
+                // 设置登录失败url
+                .failureUrl("/login/error")
                 // 自定义登陆用户名和密码参数，默认为username和password
 //                .usernameParameter("username")
 //                .passwordParameter("password")
@@ -139,21 +69,54 @@ public class WebSecurityConfig extends WebSecurityConfigurerAdapter {
         http.csrf().disable();
     }
 ```
-初次启动，如果配置自动生成token表结构，会默认在数据库中生成：
-![](https://upload-images.jianshu.io/upload_images/11464886-2d6b8ba01521b002.png?imageMogr2/auto-orient/strip%7CimageView2/2/w/1240)
-
-表结构：
+- 在 Controller 中编写 `loginError`方法完成异常处理操作：
 ```
-CREATE TABLE `persistent_logins` (
-  `username` varchar(64) NOT NULL,
-  `series` varchar(64) NOT NULL,
-  `token` varchar(64) NOT NULL,
-  `last_used` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-  PRIMARY KEY (`series`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8;
-```
->生产环境推荐，手动创建表，免得再修改代码配置
+ @GetMapping("/login/error")
+    @ResponseBody
+    public Result loginError(HttpServletRequest request) {
+        AuthenticationException authenticationException = (AuthenticationException) request.getSession().getAttribute(WebAttributes.AUTHENTICATION_EXCEPTION);
+        log.info("authenticationException={}", authenticationException);
+        Result result = new Result();
+        result.setCode(201);
 
-## 三、运行测试
-勾选自动登录后，Cookie 和数据库中均存储了 token 信息：
-![](https://upload-images.jianshu.io/upload_images/11464886-3762498c0801670d.gif?imageMogr2/auto-orient/strip)
+        if (authenticationException instanceof UsernameNotFoundException || authenticationException instanceof BadCredentialsException) {
+            result.setMsg("用户名或密码错误");
+        } else if (authenticationException instanceof DisabledException) {
+            result.setMsg("用户已被禁用");
+        } else if (authenticationException instanceof LockedException) {
+            result.setMsg("账户被锁定");
+        } else if (authenticationException instanceof AccountExpiredException) {
+            result.setMsg("账户过期");
+        } else if (authenticationException instanceof CredentialsExpiredException) {
+            result.setMsg("证书过期");
+        } else {
+            result.setMsg("登录失败");
+        }
+        return result;
+    }
+```
+
+## 四、运行项目
+首先我们修改 `CustomUserDetailsService` `loadUserByUsername()` 方法的返回值:
+![](https://upload-images.jianshu.io/upload_images/11464886-67f2c037c3afebcb.png?imageMogr2/auto-orient/strip%7CimageView2/2/w/1240)
+
+1. 输入错误的用户名或密码：
+![](https://upload-images.jianshu.io/upload_images/11464886-cf4fcc8d2733ef51.png?imageMogr2/auto-orient/strip%7CimageView2/2/w/1240)
+2. 修改返回值：enable 为 false
+![](https://upload-images.jianshu.io/upload_images/11464886-db8c5a23787f7f58.png?imageMogr2/auto-orient/strip%7CimageView2/2/w/1240)
+![](https://upload-images.jianshu.io/upload_images/11464886-1b413975a3db5a9f.png?imageMogr2/auto-orient/strip%7CimageView2/2/w/1240)
+3. 修改返回值：accountNonExpired 为 false
+![](https://upload-images.jianshu.io/upload_images/11464886-e9eeedaa1c456014.png?imageMogr2/auto-orient/strip%7CimageView2/2/w/1240)
+![](https://upload-images.jianshu.io/upload_images/11464886-98bb1b606fb5fd62.png?imageMogr2/auto-orient/strip%7CimageView2/2/w/1240)
+4. 修改返回值：credentialsNonExpired 为 false
+![](https://upload-images.jianshu.io/upload_images/11464886-b7d500ecea672441.png?imageMogr2/auto-orient/strip%7CimageView2/2/w/1240)
+![](https://upload-images.jianshu.io/upload_images/11464886-012fb669fa01ae6f.png?imageMogr2/auto-orient/strip%7CimageView2/2/w/1240)
+5. 修改返回值：accountNonLocked 为 false
+![](https://upload-images.jianshu.io/upload_images/11464886-720b9a490c90b419.png?imageMogr2/auto-orient/strip%7CimageView2/2/w/1240)
+![](https://upload-images.jianshu.io/upload_images/11464886-ef515a5c2c75a152.png?imageMogr2/auto-orient/strip%7CimageView2/2/w/1240)
+
+## 五、存在问题
+细心的同学再完成上面功能是会发现，当我们输入的用户名不存在时，不会抛出`UserNameNotFoundException`，而是抛出 `BadCredentialsException`这个异常，如果有需要区分 用户名不存在和密码错误的，可参考[https://blog.csdn.net/wzl19870309/article/details/70314085](https://blog.csdn.net/wzl19870309/article/details/70314085)。
+
+
+

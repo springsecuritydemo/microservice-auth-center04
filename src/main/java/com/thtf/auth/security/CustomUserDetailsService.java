@@ -58,7 +58,12 @@ public class CustomUserDetailsService implements UserDetailsService {
         }
 
         // 返回UserDetails实现类
-        return new User(user.getName(), user.getPassword(), authorities);
+        return new User(user.getName(), user.getPassword(),
+                true,
+                true,
+                true,
+                false,
+                authorities);
     }
 
 }

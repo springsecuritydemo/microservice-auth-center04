@@ -18,8 +18,24 @@ spring:
       testOnReturn: false #归还连接时检测连接是否有效
       timeBetweenEvictionRunsMillis: 60000 #配置间隔检测连接是否有效的时间（单位是毫秒）
       minEvictableIdleTimeMillis: 300000 #连接在连接池的最小生存时间（毫秒）
+
+  redis:
+    #数据库索引
+    database: 0
+    host: 10.10.50.230
+    port: 6379
+    password: 123456
+    #连接超时时间
+    timeout: 5000
+
+loginCode:
+  expiration: 1 #登录验证码过期时间，单位 分钟
+  prefix: login_code #验证码redis的key值前缀
+
+
 mybatis:
   configuration:
     map-underscore-to-camel-case: true #开启Mybatis下划线命名转驼峰命名
+
 
 
